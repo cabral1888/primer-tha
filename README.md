@@ -14,6 +14,7 @@ In order to start the DES ingestion layer, let us break it in two ways for input
 #### Push-oriented
 This approach is triggered by the transactional service that wants to enrich its data. For that, it was defined a interfacing API component on which this service can talk with the DES starting the enrichment request; it needs to send a JSON containing both the payload (contact list and a list of fields to be enriched), a **enrichment resquest ID (ERID)** and the total **number_of_records**. Here is an example:
 ```
+POST https://des.internal.sayprimer.com/v2/enriched_data
 {
     "erid": "3c3f4b80-f728-4d7c-8567-1bc01df5f0a1",
     "contact_list": [
@@ -72,7 +73,7 @@ Interactions with APIs such as authentication, pagination, and endpoint conventi
 Also, under the Data Enricher umbrella, we also need to define a good balance for the number of parallel requests performed to the external Data Source API that will allow us to read more data in a low-latency basis but at the same time won't compromise our Data Provider partners performance/availability.
 
 #### Data Writer
-When writting the data, we want to make sure we control the partitions of the data (see in [Storage Structure](#storage-strucure)). Not just that, but we also want to control the Data Enrichment Transactions that are still in progress. In order to keep track of the progress over the data, the Data Writter must hold a counter that will be incremented each time it writes data to the output. A mechanism can be built on top of it to make sure the data consumer will only see the data when it's fully processed, see more on the [Storage Structure](#storage-strucure) section.
+When writting the data, we want to make sure we control the partitions of the When writing the data, we want to make sure we control the partitions of the data (see in [Storage Structure](#storage-strucure)). Not only that, but we also want to control the Data Enrichment Transactions that are still in progress. To keep track of the progress of the data, the Data writer must hold a counter that will be incremented each time it writes data to the output. A mechanism can be built on top of it to make sure the data consumer will only see the data when it's fully processed, see more on the [Incomplete Enrichment Transactions](#incomplete-enrichment-transactions) section.
 
 In the Data Writer process, we need to evaluate the rate at which we are going to output data, taking into account that the more frequently the data is written, more closer to real-time it is, but also more granular files it generates increasing the I/O time on the consumer side. It's a trade-off.
 
@@ -104,7 +105,17 @@ We want to make sure that whenever a query is executed, it won't scan the full t
 Since we also want to group each Data Enrichment Transaction in a single data entity, the 2nd partition defined for the table is the `erid` field. With these two partitions defined, the executed queries will be able to retrieve the exact enriched data they will look for.
 
 ##### Incomplete Enrichment Transactions
-The Data Writter phase is accountable for make sure the consumers will only see the data when it's fully processed and it can be done at the partition level. Essentially, while the row counter on the Data Writter is lower than `number_of_records` (parameter passed all the way from the ingesting phase up to the processing job) the data will be saved in a partition with a suffix `_incomplete` at the `erid` partition name. Whenever the records counter has reached to the `number_of_records` from the request, it removes the suffix.
+The Data Writer phase is accountable for making sure the consumers will only see the data when it's fully processed and it can be done at the partition level. Essentially, while the row counter on the Data Writer is lower than `number_of_records` (parameter passed from the ingesting phase up to the processing job) the data will be saved in a partition with a suffix `_incomplete` at the `erid` partition name. Whenever the records counter has reached the `number_of_records` from the request, it removes the suffix from the partition. Below is an example:
+```
+s3://output-bucket/enriched_data/
+    request_date=2024-02-09/
+        erid=3c3f4b80-f728-4d7c-8567-1bc01df5f0a1/ # <= completed data enrichment transaction
+            <parquet files>
+        erid=ef36c16b-735b-4e14-8f94-a70c33fa50c7_incomplete/ # <= incomplete data enrichment transaction
+            part-0000.parquet
+            ....
+        ...
+```
 
 #### Serving data in a Push-oriented flow
 For the services that have push capabilities, it was offered also a push-oriented approach for retrieving the data, build on top of AWS API Gateway and AWS Lambda. This component will be in charge of transforming HTTP requests in Athena queries executed over the output S3 Bucket data.
@@ -112,7 +123,7 @@ For the services that have push capabilities, it was offered also a push-oriente
 Each request will be composed by a date range (start_date, end_date parameters) and the `erid` field. For example, below is the HTTP request and the formed query:
 ```
 # HTTP request
-https://des.internal.sayprimer.com/v2/enrich?start_date=2024-02-08&end_date=2024-02-11&erid=3c3f4b80-f728-4d7c-8567-1bc01df5f0a1
+GET https://des.internal.sayprimer.com/v2/enriched_data?start_date=2024-02-08&end_date=2024-02-11&erid=3c3f4b80-f728-4d7c-8567-1bc01df5f0a1
 
 
 # Athena query
@@ -148,7 +159,78 @@ This reponse will be composed by the payload (input data + enriched fields) as w
     ],
     "number_of_pages": 200,
     "next_page": 2,
-    "is_available": true 
+    "status": "complete" 
 }
 ```
-Since the Data Enrichment Transaction is asyncronous, the service that push the request, may also query the output endpoint from time to time in order to know whether the data is already available. Thinking on that, 
+
+##### Status request and status check
+The field `status` will play an important role in the Response, it has three possible values essentially:
+- "inexistent": this status represents the absence of data. It might happen for two reasons: (1) a company service submits a data enrichment request to DES, but when requesting a GET on the same `erid` on the output API, the streaming process wasn't ready yet (resource allocation, temporary outage, etc) or (2) the requested `erid` don't exist, meaning the data enrichment request was never performed.
+- "incomplete": this status represents an in-progress data enrichment transaction
+- "completed": this status represents a completed data enrichment transaction
+
+In the query of the previous section, only a single query statement was executed because it was enough to return more than zero rows, marked then as `completed`, however in a case where it returns zero records, the component must look at the incomplete transaction partitions (with `_incomplete` suffix) to know if the status of a transaction is either `incomplete` or `inexistent`. Here is an example of the same request, but now, zero records were found in the first query:
+```
+# HTTP request
+GET https://des.internal.sayprimer.com/v2/enriched_data?start_date=2024-02-08&end_date=2024-02-11&erid=3c3f4b80-f728-4d7c-8567-1bc01df5f0a1
+
+
+# Athena query - zero records found
+SELECT
+    *
+FROM 
+    enriched_data
+WHERE
+    request_date >= '2024-02-08' AND request_date <= '2024-02-11'
+    AND erid = '3c3f4b80-f728-4d7c-8567-1bc01df5f0a1'
+
+# Athena query - more than zero records found
+SELECT
+    *
+FROM 
+    enriched_data
+WHERE
+    request_date >= '2024-02-08' AND request_date <= '2024-02-11'
+    AND erid = '3c3f4b80-f728-4d7c-8567-1bc01df5f0a1_incomplete'
+```
+In this particular case, the status will be considered `incomplete`. In case the 2nd query also doesnt't return rows, it will be marked as `inexistent`.
+
+Since the Data Enrichment Transaction is asyncronous, the service that push the request, may also query the output endpoint from time to time in order to know whether the data is already available. Using the status mentioned above, the consumer may want to implement some rules in order to properly query the status of the request, so please consider the following python code:
+
+```python
+# Data Enrichment Transaction request
+post_data_enrichment_transaction(input_data, enrich_fields)
+
+# ...
+# Get Data Enriched request
+response = get_enriched_data(start_date, end_date, erid)
+attempt_inexistent = 0
+
+# Check for inexistent data
+while(attempt_inexistent < N_MAX_ATTEMPTS_INEXISTENT and response.status == 'inexistent'):
+    wait_exponential_rate_seconds()
+    
+    response = get_enriched_data(start_date, end_date, erid)
+    attempt_inexistent++
+
+if(response.status == 'inexistent'):
+    print("Data not found")
+
+    # re-do the Data Enrichment Transaction request using another erid
+
+else:
+    # check for incomplete data
+    attempt_incomplete = 0
+    while(attempt_incomplete < N_MAX_ATTEMPTS_INCOMPLETE and response.status == 'incomplete'):
+        wait_some_seconds()
+        
+        response = get_enriched_data(start_date, end_date, erid)
+        if(response.status == 'completed'):
+            break
+
+        attempt_incomplete++
+
+    # do the logic with the retrieved data.
+```
+
+It's important to set values for `N_MAX_ATTEMPTS_INEXISTENT` and `N_MAX_ATTEMPTS_INCOMPLETE`, so we don't keep the company service requesting the DES APIs forever.
