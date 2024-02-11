@@ -1,6 +1,6 @@
-<mxfile host="app.diagrams.net" modified="2024-02-10T20:37:13.366Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" etag="KCNPWsMmPFm-tHBVb7w-" version="23.1.2" type="device">
+<mxfile host="app.diagrams.net" modified="2024-02-11T00:44:12.379Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" etag="PAZl-tVmCvftvmToUeyL" version="23.1.2" type="device">
   <diagram name="Página-1" id="OUaDcmoHBRCRe9Xa738y">
-    <mxGraphModel dx="2620" dy="933" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="2193" dy="710" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -98,7 +98,7 @@
         <mxCell id="HXZf6LHZwiSUa-nyjyoK-49" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" edge="1" parent="1" source="HXZf6LHZwiSUa-nyjyoK-26" target="HXZf6LHZwiSUa-nyjyoK-47">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="HXZf6LHZwiSUa-nyjyoK-26" value="Data Writter" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+        <mxCell id="HXZf6LHZwiSUa-nyjyoK-26" value="Data Writer" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="180" y="397.5" width="60" height="62.5" as="geometry" />
         </mxCell>
         <mxCell id="HXZf6LHZwiSUa-nyjyoK-29" value="Amazon EMR / AWS Glue" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=#ffffff;fillColor=#232F3E;dashed=0;verticalLabelPosition=middle;verticalAlign=bottom;align=center;html=1;whiteSpace=wrap;fontSize=10;fontStyle=1;spacing=3;shape=mxgraph.aws4.productIcon;prIcon=mxgraph.aws4.emr;" vertex="1" parent="1">
