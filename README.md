@@ -54,7 +54,7 @@ To accomplish this requirement, there are two key components of the architecture
 
 Either the service has to query the transactional data directly in their database, or APIs or has to read from an intermediate storage layer (s3 buckets, FTP serves, and others), by using the pull-oriented method, the service will also be able to bring the data to the service and process it in a scalable fashion. After querying the data on the source, it will forward it to the Broker/Messaging system that keeps the boundaries between the ingestion and processing layer.
 
-One important aspect to highlight is that, even though there is no external service starting the data enrichment transaction, the Data Fetcher component must also generate a `erid` field so we can keep consistent on the data serving layer. In order to mediate the conversation between the Data Fetcher and the Data Loader components (see [Serving Layer](#serving-layer)), we can leverage AWS Managed Airflow in order to hold the `erid` for a particular ETL execution. The same is valid for the `number_of_records`
+One important aspect to highlight is that, even though there is no external service starting the data enrichment transaction, the Data Fetcher component must also generate a `erid` field so we can keep consistent on the data serving layer. In order to mediate the conversation between the Data Fetcher and the Data Loader components (see [Serving data in a Pull-oriented flow](#serving-data-in-a-pull-oriented-flow)), we can leverage AWS Managed Airflow in order to hold the `erid` for a particular ETL execution.
 
 #### Broker/Messaging system
 It will be one of the key components of the DES architecture that will provide us high scalability, as well as a fault-tolerant service which linked to the processing layer will form the high performatic core of the solution.
@@ -233,4 +233,9 @@ else:
     # do the logic with the retrieved data.
 ```
 
-It's important to set values for `N_MAX_ATTEMPTS_INEXISTENT` and `N_MAX_ATTEMPTS_INCOMPLETE`, so we don't keep the company service requesting the DES APIs forever.
+It's important to set values for `N_MAX_ATTEMPTS_INEXISTENT` and `N_MAX_ATTEMPTS_INCOMPLETE`, so we don't keep the company service requesting the DES APIs forever. For `N_MAX_ATTEMPTS_INCOMPLETE`, it's important to recognize that depending on the dataset, we might set this to a higher value.
+
+#### Serving data in a Pull-oriented flow
+Both Data Fetcher ([see in the Pull-oriented ingestion section](#pull-oriented)) and Data Loader components were designed to be part of an ETL framework built to read/write data from/to many source systems. The orchestrator tool, AWS MWAA, is in charge of mediating the communication between the two jobs, essentially passing the `erid` from Data Fetcher to Data Loader. 
+
+With the `erid`, the job can start retrieving the data using Athena and writing data on the destination. Since it's built on top of an ETL framework with generic interfaces for both sources and sinks, the Data Loader will interact with the interfaces thal will talk to the inherited-specialized objects that will interact with the destination source. This will make the whole system more extensible and whenever new sources/destinations are added, it's only a matter of extending the interfaces and implement needed methods.
