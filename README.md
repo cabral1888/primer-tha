@@ -63,7 +63,7 @@ It will be one of the key components of the DES architecture that will provide u
 The broker will act as a data storage engine for real-time data reading, allowing streaming processes to read from it in a performant way, at the same time ensuring the data consistency with an _end-to-end exactly-once_ semantics in case of failure.
 
 ### Processing Layer
-This layer is the DES functionality core, accountable for performing the data enrichment in fact. The approach chosen was streaming given the requirements for high performance and fault-tolerance; the suggested streaming job can be built on top of AWS EMR or AWS Glue framework. The streaming job logic will consist of three main internal "controllers":
+This layer is the DES functionality core, accountable for performing the data enrichment in fact. The approach chosen was streaming given the requirements for high performance and fault-tolerance, which means, a single job can scale from 1 to N distributed executors, increasing the parallel computation power ensuring the fault-tolerance at the same time. The suggested streaming job can be built on top of AWS EMR or AWS Glue framework and its logic will consist of three main internal "controllers":
 - Data reader: process in charge of reading the data from the Broker as well as managing the checkpointing of the solution, so in case of failures, the solution won't either generate data duplication or data holes. It will start exactly from where it was stopped (using the offset concept)
 - Data Enricher: it's the process that will perform the enrichment of the data, using external APIs for this purpose. Therefore it needs to control the connection to the N Data Source APIs implemented, the data rate that will be sent in each request, the number of requests, and other configurations (see more details below)
 - Data Writer: it's a process in charge of writing the data in micro-batches to the output storage (s3 bucket), allowing the enriched data to be served.
@@ -264,3 +264,31 @@ destination:
         ...
     - table: enriched_users
 ```
+
+## Monitorability
+The DES components have native integration with AWS CloudWatch, so it has been defined as the main Monitoring/Observability tool. Additionally to the logs, it's possible to access Apache Spark UI to track the Streaming Application status, as well as some other monitoring UIs available on EMR (Ganglia) for job tunning. In the case of AWS Glue, it also has some built-in UIs for monitoring, integrated with CloudWatch.
+
+In the case of metrics, each component can output its own set of metrics, so we can efficiently debug incidents:
+- APIs for interfacing input/output data: we can monitor the traffic that has been flowing through. Number of requests, number of errors 4xx, number of errors 5xx, and latency. In the case of API Gateway, all those metrics should be available. For lambdas, we can also see the number of invocations/concurrent executions, throttles, and others. It's also important to expose a `/status` endpoint, so other external services will be able to know if DES is fully operant before sending data.
+- Data Fetcher component / Data Loader components: the ETL framework built to accommodate these two pipelines must output metrics associated with the source data quality so we can make sure the ingestion/loading is working as expected when problems arise. Some examples are the number of distinct records, the number of rows with null values when reading and when writing, and others.
+- AWS Kinesis Stream also is an important component and it offers some built-in metrics: the number of successful GetRecords operations and, the number of PutRecord.Bytes, number of PutRecords.FailedRecords and so on.
+- Structure streaming enrichment job: this core component on the architecture needs to output some important metrics for each Data Enrichment Transaction, so the team knows it's operating properly: number of records fetched from AWS Kinesis Stream, number of records enriched, number of records that weren't found on the External Data Providers, number of records written, number of Data Enrichment Transactions being processed and others.
+- On the Enriched Data s3 bucket, we might find it useful to watch some metrics for example number of PutRequests. If this number is high, the streaming engine might have been writing too small files on the bucket. The number of GetRequests will also be useful to track the number of queries that have been executed against it.
+- AWS Athena: we might define some metrics on the Athena side to make sure the data downstream consumers are not facing any issues when reading the data, for example, QueryPlanningTime, QueryQueueTime, TotalExecutionTime. A higher value for these numbers might also indicate an issue on the storage side or resource allocation.
+
+With those metrics established, we may leverage thresholds and alerts on AWS Cloudwatch, so we can be alerted whenever abnormal behavior has been found on DES
+
+## Deployment strategy
+The DES components might be categorized into two types when it comes to deploying new changes: (1) the critical 24x7 and, (2) non-critical components.
+
+The first group, the critical components, will require a more robust deployment process since the main goal is to keep the service running without interruptions when either deploying or rolling back changes. Will fall in this category the interfacing input/output APIs, AWS Lambda, AWS Kinesis, and AWS Athena, the streaming processing job, and the output S3 bucket. All AWS native services will offer strategies to keep versions and will change among them without interruptions.
+
+The streaming processing job will require a more robust CI/CD pipeline and since we cannot run two streaming jobs at the same time, otherwise the processing engine might generate duplicated data on the output, the automated operations for the deployment will have to be defined as follows:
+1. whenever there are changes on the streaming processing job, the code starts the artifact building and artifact copying to the right location.
+2. when it's ready to be deployed, the CI pipeline will have to interact with the framework (AWS EMR/AWS Glue) to request the old streaming job to stop
+3. the new streaming job will be requested to start, using the same checkpoint as the previous one (starting from where the previous one has stopped)
+4. in case of rollback, after submitting the revert PR on the repository, it will repeat this process.
+
+Even though it's an error-prove CI/CD approach, it will result in some minutes of data being accumulated on AWS Kinesis/Apache Kafka and data not available in the output bucket as a result of the streaming processing job being kept stopped.
+
+For the non-critical components, mostly the pull-based approach components, the team might be able to deploy their changes normally, since a Data Fetcher/Load job won't be interrupted for a code change deployment. Also, it's important to keep the idempotency of the data pipelines, so they can be re-executed in case of rollback and still produce the same results.
