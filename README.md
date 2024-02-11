@@ -50,7 +50,8 @@ In this method, the service can't, for any reason, integrate with our Asynchrono
 
 To accomplish this requirement, there are two key components of the architecture:
 - A workflow orchestrator, AWS MWAA (Managed Workflow with Apache Airflow), accountable for managing the flows, job schedules, and dependencies for the data-pulling process
-- An Data Fetcher component in a form of an ETL framework, built on top of AWS Lambda or Spark batch jobs, that can handle multiple data sources using generic interfaces and specialized mechanism source-oriented implemented using object inheritance (circles on the architecture).
+- An Data Fetcher component in a form of an ETL (read more on [Config-based ETL framework
+](#config-based-etl-framework)), built on top of AWS Lambda or Spark batch jobs, that can handle multiple data sources using generic interfaces and specialized mechanism source-oriented implemented using object inheritance (circles on the architecture).
 
 Either the service has to query the transactional data directly in their database, or APIs or has to read from an intermediate storage layer (s3 buckets, FTP serves, and others), by using the pull-oriented method, the service will also be able to bring the data to the service and process it in a scalable fashion. After querying the data on the source, it will forward it to the Broker/Messaging system that keeps the boundaries between the ingestion and processing layer.
 
@@ -239,3 +240,27 @@ It's important to set values for `N_MAX_ATTEMPTS_INEXISTENT` and `N_MAX_ATTEMPTS
 Both Data Fetcher ([see in the Pull-oriented ingestion section](#pull-oriented)) and Data Loader components were designed to be part of an ETL framework built to read/write data from/to many source systems. The orchestrator tool, AWS MWAA, is in charge of mediating the communication between the two jobs, essentially passing the `erid` from Data Fetcher to Data Loader. 
 
 With the `erid`, the job can start retrieving the data using Athena and writing data on the destination. Since it's built on top of an ETL framework with generic interfaces for both sources and sinks, the Data Loader will interact with the interfaces thal will talk to the inherited-specialized objects that will interact with the destination source. This will make the whole system more extensible and whenever new sources/destinations are added, it's only a matter of extending the interfaces and implement needed methods.
+
+##### Config-based ETL framework
+Whenever is possible, we want to avoid write customized code, making the service generic as necessary to attend many different use cases. In the case of pull-based ingestion, this isn't different; the engineering teams don't want to spend time writing new jobs whenever a new company service requests an integration for data enrichment. Based on this statement, we can create config-based workflows on the ETL framework on which each company microservice team should be able to add their own config files and the DES should be able to deploy automatically a new ETL pipeline for it. A config file can be similar to the following:
+```yaml
+pipelineName: enrich_marketing_data
+dataSource:
+    - type: mysql
+    - extraOptions:
+        - hostname: marketing-service.internal
+        - port: 3306
+        - password: ENV_PASSWORD
+        ...
+    - table: users
+    - fields: [first_name, last_name, company]
+    - fields_to_enrich: [company_email, phone_number]
+destination:
+    - type: mysql
+    - extraOptions:
+        - hostname: output-service.internal
+        - port: 3306
+        - password: ENV_OUT_PASSWORD
+        ...
+    - table: enriched_users
+```
